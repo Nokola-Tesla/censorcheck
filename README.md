@@ -1,8 +1,8 @@
 # Censorcheck
 
 # CensorCheck — Скрипт для проверки блокировок и цензуры
-![Preview](images/img1.jpg)
-![Preview](images/img2.jpg)
+![Preview](img/img1.jpg)
+![Preview](img/img2.jpg)
 
 
 Небольшой скрипт-чекер для диагностики блокировок и цензуры на сервере.  
