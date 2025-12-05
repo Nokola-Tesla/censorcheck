@@ -239,7 +239,6 @@ check_keyword_blocking() {
     return 0  
   fi
   
-  # Test IP 
   local sni_code
   sni_code=$(curl -s -o /dev/null --connect-timeout "$TIMEOUT" --resolve "$domain:443:192.0.2.1" "$test_url" -w "%{http_code}" 2>/dev/null)
   
@@ -250,7 +249,6 @@ check_keyword_blocking() {
   return 1 
 }
 
-# Check TLS/SSL
 check_certificate() {
   local domain="$1"
   local cert_info
@@ -280,7 +278,6 @@ check_domain() {
   local status_color=$RED
   local status_text="BLOCKED"
 
-  # DNS
   local ips
   ips=$(nslookup "$domain" 2>/dev/null | awk '/^Address: / && !/#/ {print $2}')
   
@@ -326,11 +323,9 @@ check_domain() {
     block_type="TLS/SSL"
   fi
 
-  # HTTP/HTTPS check
   http_code=$(fetch_code "http://$domain")
   https_code=$(fetch_code "https://$domain")
 
-  # HTTP redirects
   if [[ "$http_code" =~ 3[0-9][0-9] ]]; then
     $VERBOSE && echo "HTTP redirect detected for $domain, falling back to HTTPS"
     http_code="$https_code"  
@@ -354,7 +349,6 @@ check_domain() {
     fi
   fi
 
-  # AI domains regional blocks
   if [[ " ${AI_DOMAINS[*]} " =~ " ${domain} " ]]; then
     local ai_response
     ai_response=$(curl -s -A "$USER_AGENT" \
@@ -379,7 +373,7 @@ check_domain() {
     fi
   fi
 
-  # Final status
+  # Final
   if [[ "$http_code" == "000" && "$https_code" == "000" ]]; then
     printf "%-${DOMAIN_WIDTH}s  ${RED_ITALIC}%s${RESET} (${YELLOW}%s${RESET}) ${cert_status}\n" "$domain" "$status_text" "$block_type"
   elif [[ "$http_code" =~ [23][0-9][0-9] || "$https_code" =~ [23][0-9][0-9] ]]; then
