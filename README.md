@@ -1,7 +1,7 @@
 # Network Censorship Checker
 
 # CensorCheck — Скрипт для проверки блокировок и цензуры
-![Preview](img/img1.jpg)
+![Preview](img/img3.jpg)
 
 Небольшой скрипт-чекер для диагностики блокировок и цензуры на сервере.  
 Особенно полезен для VPS/VDS, с локацией РФ.
