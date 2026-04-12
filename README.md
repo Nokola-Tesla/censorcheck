@@ -42,6 +42,6 @@ wget -qO- censorcheck.tlab.pw | bash
 
 ### 🔧 Запуск (с GitHub)
 ```bash
-wget -qO- https://raw.githubusercontent.com/Nokola-Tesla/IPerf3-Speed-Test-Script/main/censorcheck.sh | bash
+wget -qO- https://raw.githubusercontent.com/Nokola-Tesla/censorcheck/main/censorcheck.sh | bash
 ```
 
