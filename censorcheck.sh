@@ -2,11 +2,12 @@
 
 # -----------------------------------------
 # Censor-check script
-# Автор модификации Nikola Tesla ©, по багам, вопросам пишите в ТГ https://t.me/tracerlab 
+# Автор скрипта Nikola Tesla ©, по багам, вопросам пишите в ТГ https://t.me/tracerlab 
 # -----------------------------------------
 
 TIMEOUT=4
 RETRIES=2
+MAX_PARALLEL=10
 USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 IP_VERSION=4
 PROXY=""
@@ -25,7 +26,7 @@ DOMAINS=(
   "linkedin.com"
   "signal.org"
   "tiktok.com"
-  "web.telegram.org"
+  "api.telegram.org"
   "web.whatsapp.com"
   "discord.com"
   "viber.com"
@@ -39,10 +40,14 @@ DOMAINS=(
   "nnmclub.to"
   "digitalocean.com"
   "api.cloudflare.com"
+  "speedtest.net"
   "aws.amazon.com"
-  "ntc.party"
+  "ooni.org"
   "amnezia.org"
   "torproject.org"
+  "proton.me"
+  "github.com"
+  "google.com"
 )
 
 AI_DOMAINS=(
@@ -62,8 +67,27 @@ RED_ITALIC="\033[31;3m"
 GREEN_ITALIC="\033[32;3m"
 YELLOW_ITALIC="\033[33;3m"
 BLUE_ITALIC="\033[34;3m"
+DIM="\033[2;90m"
 
-DOMAIN_WIDTH=20
+DOMAIN_WIDTH=22
+LINE_SEP="----------------------------------------------------------------------"
+# В тестовом режиме
+RKN_STUB_IPS=(
+  "195.208.4.1"    # Ростелеком
+  "195.208.5.1"    # Ростелеком
+  "188.186.157.35" # МТС
+  "80.93.183.168"  # Билайн
+  "213.87.154.141" # МТС
+  "92.101.255.255" # Мегафон
+)
+
+is_rkn_spoof() {
+  local ip="$1"
+  for stub in "${RKN_STUB_IPS[@]}"; do
+    [[ "$ip" == "$stub" ]] && return 0
+  done
+  return 1
+}
 
 # Инстал зависимостей
 install_missing_deps() {
@@ -122,7 +146,7 @@ install_missing_deps() {
     quiet_update_cmd="apt update -y -q"
     install_cmd="apt install -y"
     quiet_install_cmd="apt install -y -q"
-    # Debian/Ubuntu
+    # Debian
     for dep in "${missing[@]}"; do
       case "$dep" in
         curl) pkg_names+=("curl") ;;
@@ -284,8 +308,19 @@ check_domain() {
   if [[ -z "$ips" ]]; then
     block_type="DNS"
     printf "%-${DOMAIN_WIDTH}s  ${RED_ITALIC}%s${RESET} (${YELLOW}%s${RESET})\n" "$domain" "$status_text" "$block_type"
+    echo "STATUS:BLOCKED"
     return
   fi
+
+  for ip in $ips; do
+    if is_rkn_spoof "$ip"; then
+      block_type="DNS-SPOOF"
+      printf "%-${DOMAIN_WIDTH}s  ${RED_ITALIC}%s${RESET} (${YELLOW}%s${RESET}) ${RED}[RKN stub: %s]${RESET}\n" \
+        "$domain" "$status_text" "$block_type" "$ip"
+      echo "STATUS:BLOCKED"
+      return
+    fi
+  done
 
   local ip_ok=false
   local port_443_ok=false
@@ -312,6 +347,7 @@ check_domain() {
   if ! $ip_ok; then
     block_type="IP/TCP"
     printf "%-${DOMAIN_WIDTH}s  ${RED_ITALIC}%s${RESET} (${YELLOW}%s${RESET})\n" "$domain" "$status_text" "$block_type"
+    echo "STATUS:BLOCKED"
     return
   fi
 
@@ -323,12 +359,13 @@ check_domain() {
     block_type="TLS/SSL"
   fi
 
+  local http_code https_code
   http_code=$(fetch_code "http://$domain")
   https_code=$(fetch_code "https://$domain")
 
   if [[ "$http_code" =~ 3[0-9][0-9] ]]; then
     $VERBOSE && echo "HTTP redirect detected for $domain, falling back to HTTPS"
-    http_code="$https_code"  
+    http_code="$https_code"
   fi
 
   if [[ "$http_code" == "000" && "$https_code" == "000" ]]; then
@@ -364,41 +401,141 @@ check_domain() {
       --connect-timeout "$TIMEOUT" "https://$domain" 2>/dev/null)
     if echo "$ai_response" | grep -qi "sorry, you have been blocked\|you are unable to access\|not available in your region\|restricted in your country\|access denied due to location\|blocked in your area\|unable to load site\|if you are using a vpn\|Not Available"; then
       block_type="REGIONAL"
-      http_code="000"  # Force BLOCKED status
+      http_code="000"  
       https_code="000"
     elif echo "$ai_response" | grep -qi "just a moment\|enable javascript and cookies"; then
-      block_type=""  # Clear block type
-      http_code="200"  # Force OK status
+      block_type=""  
+      http_code="200"  
       https_code="200"
     fi
   fi
 
-  # Final
   if [[ "$http_code" == "000" && "$https_code" == "000" ]]; then
     printf "%-${DOMAIN_WIDTH}s  ${RED_ITALIC}%s${RESET} (${YELLOW}%s${RESET}) ${cert_status}\n" "$domain" "$status_text" "$block_type"
+    echo "STATUS:BLOCKED"
   elif [[ "$http_code" =~ [23][0-9][0-9] || "$https_code" =~ [23][0-9][0-9] ]]; then
     printf "%-${DOMAIN_WIDTH}s  ${GREEN_ITALIC}%s${RESET} ${cert_status}\n" "$domain" "OK"
+    echo "STATUS:OK"
   else
     printf "%-${DOMAIN_WIDTH}s  ${YELLOW_ITALIC}%s${RESET} (${BLUE}%s${RESET}) ${cert_status}\n" "$domain" "PARTIAL" "$block_type"
+    echo "STATUS:PARTIAL"
   fi
 }
 
+animate() {
+  local total=$1
+  local tmpdir=$2
+  local i=0
+  
+  local frames=(
+    "🤬 🔨       🌐"
+    "🤬  🔨      🌐"
+    "🤬   🔨     🌐"
+    "🤬    🔨    🌐"
+    "🤬     🔨   🌐"
+    "🤬      🔨  🌐"
+    "🤬       💥 💔"
+    "🤬        🔥💨"
+  )
+
+  # РКН и блокировки :)
+  local funny_texts=(
+    "Роскомнадзор заблокировал сам себя. Ждем..."
+    "Объясняем ТСПУ, что это просто картинки с котиками..."
+    "Маскируем Reality-трафик под доставку ВкусВилл..."
+    "Ищем свободный IP в реестре запрещенных сайтов..."
+    "Оформляем VLESS как доступ к Госуслугам..."
+    "РКН снова забанил 127.0.0.1. Пытаемся выжить..."
+    "Оборачиваем BGP-маршруты в шапочку из фольги..."
+    "Настраиваем передачу пакетов голубиной почтой..."
+    "Спорим с провайдером о цифровой независимости..."
+  )
+
+  tput civis 2>/dev/null
+
+  while true; do
+    local done_count=$(ls "$tmpdir"/*.txt 2>/dev/null | wc -l)
+    
+    local frame_idx=$(( (i / 2) % ${#frames[@]} ))
+    local frame="${frames[$frame_idx]}"
+    
+    local text_idx=$(( (i / 50) % ${#funny_texts[@]} ))
+    local current_text="${funny_texts[$text_idx]}"
+    
+    printf "\r[${GREEN}%2d${RESET}/${YELLOW}%d${RESET}] %s  ${CYAN}%s${RESET}\e[K" \
+      "$done_count" "$total" "$frame" "$current_text"
+    
+    sleep 0.2
+    i=$(( i + 1 ))
+  done
+}
+
 clear
-echo "--- Network Censorship Checker by Nikola Tesla ---"
+echo "======================================================================"
+echo "              Network Censorship Checker by Nikola Tesla              "
+echo "======================================================================"
 echo
-echo "Domain                Status    Block Type"
-echo "--------------------------------------------------"
+
+printf "%-${DOMAIN_WIDTH}s  %-8s %s\n" "Domain" "Status" "Block Type"
+echo "$LINE_SEP"
 
 start_time=$(date +%s)
 
-for d in "${DOMAINS[@]}"; do
-  check_domain "$d"
+TMPDIR_RESULTS=$(mktemp -d)
+
+animate "${#DOMAINS[@]}" "$TMPDIR_RESULTS" &
+ANIM_PID=$!
+
+job_pids=()
+
+for i in "${!DOMAINS[@]}"; do
+  d="${DOMAINS[$i]}"
+  check_domain "$d" > "$TMPDIR_RESULTS/$i.txt" &
+  job_pids+=($!)
+
+  if (( ${#job_pids[@]} >= MAX_PARALLEL )); then
+    wait "${job_pids[0]}" 2>/dev/null
+    job_pids=("${job_pids[@]:1}")
+  fi
 done
+
+wait "${job_pids[@]}" 2>/dev/null
+
+kill "$ANIM_PID" 2>/dev/null
+wait "$ANIM_PID" 2>/dev/null 
+printf "\r\e[K"              
+tput cnorm 2>/dev/null       
+
+count_ok=0
+count_blocked=0
+count_partial=0
+
+for i in "${!DOMAINS[@]}"; do
+  grep -v "^STATUS:" "$TMPDIR_RESULTS/$i.txt"
+  status=$(grep "^STATUS:" "$TMPDIR_RESULTS/$i.txt" | cut -d: -f2)
+  case "$status" in
+    OK)      (( count_ok++ ))      ;;
+    BLOCKED) (( count_blocked++ )) ;;
+    PARTIAL) (( count_partial++ )) ;;
+  esac
+done
+
+rm -rf "$TMPDIR_RESULTS"
 
 end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))
 elapsed_minutes=$((elapsed_time / 60))
+elapsed_seconds=$((elapsed_time % 60))
 
-echo "--------------------------------------------------"
-echo "Test completed in $elapsed_minutes minutes."
+total_domains=${#DOMAINS[@]}
+
+echo "$LINE_SEP"
+printf "${GREEN}OK: %d${RESET}  ${RED}BLOCKED: %d${RESET}  ${YELLOW}PARTIAL: %d${RESET}  ${DIM}Total: %d${RESET}\n" \
+  "$count_ok" "$count_blocked" "$count_partial" "$total_domains"
+echo "$LINE_SEP"
+if (( elapsed_minutes > 0 )); then
+  echo "Test completed in ${elapsed_minutes}m ${elapsed_seconds}s."
+else
+  echo "Test completed in ${elapsed_seconds}s."
+fi
 echo -e "Follow: $(tput setaf 6)https://t.me/tracerlab$(tput sgr0)"
